@@ -1,6 +1,7 @@
 import qrcode
 import os
 import json
+import threading
 import customtkinter as ctk
 from PIL import Image
 from openpyxl import Workbook, load_workbook
@@ -15,7 +16,6 @@ class QRCodeApp:
         self.root.title("QR Code Generator")
         self.root.geometry("400x500")
         self.root.minsize(400, 500)
-        self.root.maxsize(400, 500)
 
         # Set initial default labels
         self.default_labels = {"A": "Data A", "B": "Data B", "C": "Data C", "D": "Data D", "E": "Data E"}
@@ -63,7 +63,8 @@ class QRCodeApp:
         self.qr_code_label.pack()
 
         # Bind Ctrl+Q to open the label edit window
-        root.bind('<Control-q>', self.open_label_edit_window)
+        self.root.bind('<Control-q>', self.open_label_edit_window)
+        self.root.after(1000, self.ensure_ctrl_q_binding)  # Ensures binding remains active
 
     def load_labels(self):
         if os.path.exists(self.labels_path):
@@ -104,14 +105,17 @@ class QRCodeApp:
             workbook.save(self.main_excel_path)
 
     def open_label_edit_window(self, event=None):
-        # Opens the label edit window only once
+        # Check if the edit window already exists and is still open
         if hasattr(self, 'edit_window') and self.edit_window.winfo_exists():
-            return  # If the window is already open, do nothing
+            self.edit_window.lift()  # Bring existing window to the front
+            return
 
+        # Create a new label edit window
         self.edit_window = Toplevel(self.root)
         self.edit_window.title("Edit Labels")
         self.edit_window.geometry("500x400")
 
+        # Use a frame for label entry fields
         self.edit_frame = ctk.CTkFrame(self.edit_window)
         self.edit_frame.pack(pady=20, padx=20)
 
@@ -120,7 +124,7 @@ class QRCodeApp:
         for key, label_text in self.entry_labels.items():
             label = ctk.CTkLabel(self.edit_frame, text=f"Edit Label for {label_text}:", font=("Arial", 12))
             label.grid(row=row, column=0, padx=10, pady=5, sticky="w")
-            label_entry = ctk.CTkEntry(self.edit_frame, width=200, font=("Arial", 12))
+            label_entry = ctk.CTkEntry(self.edit_frame, width=200, font=("Arial", 12))  # Entry box starts empty
             label_entry.grid(row=row, column=1, padx=10, pady=5)
             self.label_entries[key] = label_entry
             row += 1
@@ -129,9 +133,12 @@ class QRCodeApp:
         submit_button.pack(pady=20)
 
     def submit_labels(self):
-        new_labels = {key: self.label_entries[key].get().strip() for key in self.entry_labels}
+        new_labels = {}
+        for key in self.entry_labels:
+            entry_value = self.label_entries[key].get().strip()
+            new_labels[key] = entry_value if entry_value else self.entry_labels[key]
 
-        if new_labels != self.previous_labels and any(new_labels[key] for key in new_labels):
+        if new_labels != self.previous_labels:
             self.entry_labels = new_labels
             self.save_labels(self.entry_labels)
 
@@ -151,12 +158,14 @@ class QRCodeApp:
 
             self.previous_labels = new_labels.copy()
 
-        # Close the edit label window after updating
         self.edit_window.destroy()
 
     def generate_qr(self):
+        # Run QR generation in a separate thread to keep UI responsive
+        threading.Thread(target=self._generate_qr_task).start()
+
+    def _generate_qr_task(self):
         data_values = [self.entries[key].get().strip() for key in ['A', 'B', 'C', 'D', 'E']]
-        
         filtered_data_values = [value for value in data_values if value]
 
         if not filtered_data_values:
@@ -205,6 +214,10 @@ class QRCodeApp:
         qr_photo = ctk.CTkImage(qr_image_pil, size=(200, 200))
         self.qr_code_label.configure(image=qr_photo)
         self.qr_code_label.image = qr_photo
+
+    def ensure_ctrl_q_binding(self):
+        self.root.bind('<Control-q>', self.open_label_edit_window)
+        self.root.after(1000, self.ensure_ctrl_q_binding)
 
 # Run the application                    
 if __name__ == "__main__":
